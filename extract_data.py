@@ -72,7 +72,7 @@ def extract_data_from_bag(bag_path_info):
     save_path += "/data/" + bag_path_info[1] + "/"
 
     se_topic = '/state_estimator/anymal_wheels_state'
-    actuator_topic = '/anymal_wheels_lowlevel_controller/actuator_readings'
+    # actuator_topic = '/anymal_wheels_lowlevel_controller/actuator_readings'
     gps_topic = '/gps/gps'
     perf_topic = '/performance_logger/performance_state'
     command_topic = '/locomotion/vel_command'
@@ -82,6 +82,11 @@ def extract_data_from_bag(bag_path_info):
     resample_freq = str(dt.to_sec()) + ' S'
 
     map_frame = 'map_o3d'
+
+    #for anymal bag
+    se_topic = '/state_estimator/anymal_state'
+    command_topic = '/twist_mux/twist'
+    map_frame = 'odom'
 
     bag = rosbag.Bag(bag_path)
     start_time = bag.get_start_time()
@@ -136,8 +141,8 @@ def extract_data_from_bag(bag_path_info):
 
                 joint_data.append(msg.header.stamp.to_sec(), joint_state)
 
-        elif topic == perf_topic:
-            cot_data.append(msg.header.stamp.to_sec(), {'cot': msg.cost_of_transport})
+        # elif topic == perf_topic:
+        #     cot_data.append(msg.header.stamp.to_sec(), {'cot': msg.cost_of_transport})
         elif topic == command_topic:
             command = msg_to_command(msg)
             command_data.append(msg.header.stamp.to_sec(), command)
@@ -151,8 +156,10 @@ def extract_data_from_bag(bag_path_info):
     command_df = generate_df_from_buffer(command_data)
     command_df = command_df.resample(resample_freq).ffill().dropna(axis=0, how='any')
 
+    print(command_df)
+
     motion_df = generate_df_from_buffer(motion_data)
-    cot_df = generate_df_from_buffer(cot_data)
+    # cot_df = generate_df_from_buffer(cot_data)
     joint_df = generate_df_from_buffer(joint_data)
 
     def resample_df_with_index(df, resampled_idx):
@@ -167,10 +174,11 @@ def extract_data_from_bag(bag_path_info):
         return df
 
     motion_df = resample_df_with_index_mean(motion_df, command_df.index)
-    cot_df = resample_df_with_index_mean(cot_df, command_df.index)
+    # cot_df = resample_df_with_index_mean(cot_df, command_df.index)
     joint_df = resample_df_with_index_mean(joint_df, command_df.index)
 
-    df_concat = pd.concat([command_df, motion_df, cot_df, joint_df], axis=1)
+    # df_concat = pd.concat([command_df, motion_df, cot_df, joint_df], axis=1)
+    df_concat = pd.concat([command_df, motion_df, joint_df], axis=1)
 
     # Also add time column.. in a weird way
     df_concat['time'] = df_concat.index.microsecond / 1e6 +\
@@ -215,11 +223,13 @@ if __name__ == '__main__':
 
     # The bag file should be in the same directory as your terminal
     bag_paths = [
-        ("/home/jolee/Documents/bags/0421_glatt/mission2/2023-04-21-17-40-58_anymal-chimera_mission.bag", '0421_mission2'),
-        ("/home/jolee/Documents/bags/0421_glatt/mission3/2023-04-21-18-01-30_anymal-chimera_mission.bag", '0421_mission3'),
-        ("/home/jolee/Documents/bags/0427_glatt/mission1/2023-04-27-15-42-50_anymal-chimera_mission.bag", '0427_mission1'),
-        ("/home/jolee/Documents/bags/0427_glatt/mission2/2023-04-27-16-18-06_anymal-chimera_mission.bag", '0427_mission2'),
-        ("/home/jolee/Documents/bags/0504_glatt_good/2023-05-04-16-12-59_mission.bag", '0504_mission')
+        # ("/home/jolee/Documents/bags/0421_glatt/mission2/2023-04-21-17-40-58_anymal-chimera_mission.bag", '0421_mission2'),
+        # ("/home/jolee/Documents/bags/0421_glatt/mission3/2023-04-21-18-01-30_anymal-chimera_mission.bag", '0421_mission3'),
+        # ("/home/jolee/Documents/bags/0427_glatt/mission1/2023-04-27-15-42-50_anymal-chimera_mission.bag", '0427_mission1'),
+        # ("/home/jolee/Documents/bags/0427_glatt/mission2/2023-04-27-16-18-06_anymal-chimera_mission.bag", '0427_mission2'),
+        # ("/home/jolee/Documents/bags/0504_glatt_good/2023-05-04-16-12-59_mission.bag", '0504_mission')
+        # ("/home/jolee/Downloads/2023-05-22-13-17-23_anymal-chimera_mission.bag", '0522_mission'),
+        ("/home/jolee/Downloads/data_2022-07-31-19-34-26.bag", 'anymal_c'),
     ]
 
     for bag in bag_paths:
