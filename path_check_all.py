@@ -7,12 +7,12 @@ from scipy.signal import butter, lfilter, freqz
 
 
 csv_paths = [
-    # ("data/0421_mission2/motion.csv", 0, 0),
-    # ("data/0421_mission3/motion.csv", 0, 0),
-    # ("data/0427_mission1/motion.csv", 0, 0),
+    # ("data/0421_mission2/motion_400hz.csv", 0, 0),
+    # ("data/0421_mission3/motion_400hz.csv", 0, 0),
+    ("data/0427_mission1/motion_400hz.csv", 0, 0),
     # ("data/0427_mission2/motion.csv", 0, 180),
     # ("data/0504_mission/motion.csv", 0, 620),
-    ("data/0522_mission/motion.csv", 0, 0),
+    # ("data/0522_mission/motion.csv", 0, 0),
     # ("data/anymal_c/motion.csv", 0, 0),
 ]
 
@@ -118,16 +118,18 @@ for i, csv_path in enumerate(csv_paths):
 
     cots = []
     for data_idx in range(joint_velocities.shape[0]):
-        joint_positive_mech_power = np.maximum(np.multiply(joint_velocities[data_idx], joint_torques[data_idx]), 0.0)
-        cot_computed = np.sum(joint_positive_mech_power) / (np.maximum(0.0, moving_speeds[data_idx]) * 9.81)
+        mechanical_power = np.sum(np.clip(joint_velocities[data_idx] * joint_torques[data_idx], 0.0, None))
+        cot_computed = mechanical_power / (np.clip(moving_speeds[data_idx], 0.01, None) * 9.81)
+
+        # joint_positive_mech_power = np.maximum(np.multiply(joint_velocities[data_idx], joint_torques[data_idx]), 0.0)
+        # cot_computed = np.sum(joint_positive_mech_power) / (np.maximum(0.0, moving_speeds[data_idx]) * 9.81)
         cot_computed /= robot_mass
-        print(joint_velocities[data_idx], ", \n", joint_torques[data_idx], ", \n",joint_positive_mech_power)
 
         cots.append(cot_computed)
 
     time = np.arange(len(cots))
 
-    fs = 20.0
+    fs = 400.0
     cutoff = 5.0
     order = 5
     cot_filtered = butter_lowpass_filter(cots, cutoff, fs, order)
@@ -277,7 +279,7 @@ axes[1].tick_params(axis='x', labelsize=8)
 axes[1].axvline(mean_value_cot, color=color_list[2], linewidth=2)  # Add a vertical line at the median value
 # axes[1].axvline(median_value_cot, color=color_list[0], linewidth=2)  # Add a vertical line at the median value
 axes[1].axvline(anymal_mean_cot, color=color_list[1], linewidth=2)  # Add a vertical line at the median value
-axes[1].set_xlim(right=0.75)
+# axes[1].set_xlim(right=0.75)
 
 # Add value annotations above each bar in the second histogram
 # for count, patch in zip(n, patches):

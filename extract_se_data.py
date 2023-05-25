@@ -78,50 +78,44 @@ def extract_data_from_bag(bag_path_info):
     command_topic = '/locomotion/vel_command'
 
 
-    dt = rospy.Duration.from_sec(0.005)
+    dt = rospy.Duration.from_sec(0.0025)
     resample_freq = str(dt.to_sec()) + ' S'
 
     map_frame = 'map_o3d'
 
     #for anymal bag
     se_topic = '/state_estimator/anymal_state'
-    command_topic = '/twist_mux/twist'
+    command_topic = '/local_guidance_path_follower/twist'
     map_frame = 'odom'
 
     bag = rosbag.Bag(bag_path)
     start_time = bag.get_start_time()
     end_time = bag.get_end_time()
     duration = end_time - start_time
-    tf_buffer = tf2_py.BufferCore(rospy.Duration.from_sec(duration))
-
-    # fill tf buffer
-    for topic, msg, t in bag.read_messages(topics=['/tf']):
-        for transform in msg.transforms:
-            tf_buffer.set_transform(transform, 'rosbag')
 
     # Extract data from rosbag
     linear_velocities_data = []
     base_positions_data = []
     command_data = DataBuffer('command')
     motion_data = DataBuffer('motion')
-    cot_data = DataBuffer('cot')
     joint_data = DataBuffer('joint')
 
-    for topic, msg, t in bag.read_messages(topics=[se_topic, perf_topic, command_topic]):
+    csv_path = save_path + "/se_data.csv"
 
-        if topic == se_topic:
-            lin_vel = msg_to_body_lin_vel(msg)  # in baseframe
-            # get base position at current time stamp
-            if tf_buffer.can_transform_core(map_frame, 'base', rospy.Time.from_sec(t.to_sec()))[0]:
-                base_pos = tf_buffer.lookup_transform_core(map_frame, 'base', rospy.Time.from_sec(t.to_sec()))
+    with open(csv_path, mode='w') as csv_file:
+        fieldnames = ['time', 'linear_x', 'linear_y', 'linear_z', 'joint_position', 'joint_velocity', 'joint_torque']
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+
+        for topic, msg, t in bag.read_messages(topics=[se_topic, command_topic]):
+
+            if topic == se_topic:
+                lin_vel = msg_to_body_lin_vel(msg)  # in baseframe
 
                 motion = {
                     'linear_x': lin_vel[0],
                     'linear_y': lin_vel[1],
-                    'linear_z': lin_vel[2],
-                    'base_x': base_pos.transform.translation.x,
-                    'base_y': base_pos.transform.translation.y,
-                    'base_z': base_pos.transform.translation.z
+                    'linear_z': lin_vel[2]
                 }
                 motion_data.append(msg.header.stamp.to_sec(), motion)
 
@@ -141,11 +135,21 @@ def extract_data_from_bag(bag_path_info):
 
                 joint_data.append(msg.header.stamp.to_sec(), joint_state)
 
-        # elif topic == perf_topic:
-        #     cot_data.append(msg.header.stamp.to_sec(), {'cot': msg.cost_of_transport})
-        elif topic == command_topic:
-            command = msg_to_command(msg)
-            command_data.append(msg.header.stamp.to_sec(), command)
+                csv_dict = {
+                    'time': t.to_sec(),
+                    'linear_x': lin_vel[0],
+                    'linear_y': lin_vel[1],
+                    'linear_z': lin_vel[2],
+                    'joint_position': joint_position,
+                    'joint_velocity': joint_velocity,
+                    'joint_torque': joint_torque,
+                }
+                # csv_dict.update(joint_state)
+                writer.writerow(csv_dict)
+
+            elif topic == command_topic:
+                command = msg_to_command(msg)
+                command_data.append(msg.header.stamp.to_sec(), command)
 
     # convert data to pandas dataframe
     def generate_df_from_buffer(data_buffer):
@@ -154,17 +158,15 @@ def extract_data_from_bag(bag_path_info):
         return df
 
     command_df = generate_df_from_buffer(command_data)
-    command_df = command_df.resample(resample_freq).ffill().dropna(axis=0, how='any')
-
-    print(command_df)
 
     motion_df = generate_df_from_buffer(motion_data)
-    # cot_df = generate_df_from_buffer(cot_data)
     joint_df = generate_df_from_buffer(joint_data)
+
+
 
     def resample_df_with_index(df, resampled_idx):
         df.index = pd.to_datetime(df.index, unit='s')
-        df = df.reindex(resampled_idx, method='ffill', tolerance=str(dt * 0.5) + 's')
+        df = df.reindex(resampled_idx, method='nearest')
         return df
 
     def resample_df_with_index_mean(df, resampled_idx):
@@ -173,12 +175,17 @@ def extract_data_from_bag(bag_path_info):
         df = df.reindex(resampled_idx, method='nearest')
         return df
 
-    motion_df = resample_df_with_index_mean(motion_df, command_df.index)
-    # cot_df = resample_df_with_index_mean(cot_df, command_df.index)
-    joint_df = resample_df_with_index(joint_df, command_df.index)
+    command_df = command_df.resample(resample_freq).ffill().dropna(axis=0, how='any')
+    # joint_df = joint_df.resample(resample_freq).ffill().dropna(axis=0, how='any')
 
-    # df_concat = pd.concat([command_df, motion_df, cot_df, joint_df], axis=1)
+    print(np.isnan(joint_df).any())
+    print("debug")
+
+    joint_df = resample_df_with_index(joint_df, command_df.index)
+    motion_df = resample_df_with_index_mean(motion_df, command_df.index)
+
     df_concat = pd.concat([command_df, motion_df, joint_df], axis=1)
+    df_concat = df_concat.dropna(axis=0, how='any')
 
     # Also add time column.. in a weird way
     df_concat['time'] = df_concat.index.microsecond / 1e6 +\
@@ -187,37 +194,9 @@ def extract_data_from_bag(bag_path_info):
                         df_concat.index.hour * 3600
     df_concat['time'] = df_concat['time'] - df_concat['time'][0]
 
-    motion_csv_path = os.path.join(save_path, 'motion_400hz.csv')
+    motion_csv_path = os.path.join(save_path, 'motion_400hz2.csv')
     df_concat.to_csv(motion_csv_path, index=False)
 
-    # Save the GPX file
-    gpx = gpxpy.gpx.GPX()
-    track = gpxpy.gpx.GPXTrack()
-    gpx.tracks.append(track)
-    # Create a track segment and add it to the track
-    segment = gpxpy.gpx.GPXTrackSegment()
-    track.segments.append(segment)
-
-    cov_threshold = 10.0
-    # Add each GPS point to the track segment
-    for topic, msg, t in bag.read_messages(topics=[gps_topic]):
-        if msg.position_covariance[0] > cov_threshold and msg.position_covariance[4] > cov_threshold:
-            continue
-        if msg.status.satellites_visible < 4:
-            continue
-        point_time = datetime.fromtimestamp(t.to_sec())
-        point = gpxpy.gpx.GPXTrackPoint(latitude=msg.latitude, longitude=msg.longitude, elevation=msg.altitude,
-                                        time=point_time)
-        segment.points.append(point)
-
-    gpx_file_path = os.path.join(save_path, 'data.gpx')
-
-    with open(gpx_file_path, "w") as f:
-        f.write(gpx.to_xml())
-
-    print("GPX file saved to:", gpx_file_path)
-
-    bag.close()
 
 if __name__ == '__main__':
 
@@ -229,8 +208,10 @@ if __name__ == '__main__':
         # ("/media/jolee/Samsung_T5/1_bags/0427_glatt/mission2/2023-04-27-16-18-06_anymal-chimera_mission.bag", '0427_mission2'),
         # ("/media/jolee/Samsung_T5/1_bags/0504_glatt_good/2023-05-04-16-12-59_mission.bag", '0504_mission'),
         # ("/home/jolee/Downloads/2023-05-22-13-17-23_anymal-chimera_mission.bag", '0522_mission'),
+        # ("/home/jolee/Downloads/data_2022-07-31-19-34-26.bag", 'anymal_c'),
         # ("/home/jolee/Downloads/2021-09-21-11-11-05_anymal-chimera_mission.bag", 'anymal_c2'),
         ("/home/jolee/Downloads/2021-09-21-11-28-48_anymal-caiman_mission.bag", 'anymal_caiman_darpa'),
+
     ]
 
     for bag in bag_paths:
