@@ -125,6 +125,7 @@ def extract_data_from_bag(bag_path_info):
                 }
                 motion_data.append(msg.header.stamp.to_sec(), motion)
 
+                print(msg)
                 joint_position = msg_to_joint_positions(msg)
                 joint_velocity = msg_to_joint_velocities(msg)
                 joint_torque = msg_to_joint_torques(msg)
